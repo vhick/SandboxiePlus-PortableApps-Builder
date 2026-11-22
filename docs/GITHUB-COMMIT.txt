@@ -1,10 +1,11 @@
-Summary: Fix upstream portable INI validation for Sandboxie Plus (b1r3)
+Summary: Fix GitHub release check on first-time builds (b1r4)
 
 Description:
-- Fix false failure in upstream installer preflight at v1.19.1.
-- Parse [Files] Source and DestDir fields separately instead of expecting {app}\Sandboxie-Plus.ini.
-- Verify both INI files are portable-only, stored in {app}, and not overwritten on upgrades.
-- Add fail-closed checks for unexpected filenames, destinations and duplicate declarations.
-- Add eight regression tests based on the official v1.19.1 installer layout (27 total offline tests).
-- Preserve b1r2 Classic/Plus release selection and case-insensitive license validation fixes.
-- Retain pinned universal package builder and release publisher, data protections, and publish-disabled first-run defaults.
+- Fix Step 6 exiting when a new release tag does not exist yet.
+- Replace fragile gh release view call with authenticated GitHub API status checks.
+- Allow missing releases after verifying repository access.
+- Block permission failures, incomplete releases, and unsafe tag overwrites.
+- Keep safe test-only force-rebuild behavior.
+- Add 12 release-guard regression tests (39 total).
+- Preserve working b1r3 upstream Plus detection and Inno portable checks.
+- Keep shared packager v1.0.0 and release publisher v1.1.1 pinned.
