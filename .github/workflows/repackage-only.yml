@@ -1,0 +1,90 @@
+name: Sandboxie Plus - Repackage a validated release ZIP
+on:
+  workflow_dispatch:
+    inputs:
+      source_release_tag:
+        description: 'Exact existing builder repository release tag containing the validated ZIP'
+        type: string
+        required: true
+      source_zip_asset:
+        description: 'Exact original .zip filename, not a glob'
+        type: string
+        required: true
+      new_release_tag:
+        description: 'Fresh portable- release tag; must not exist'
+        type: string
+        required: true
+      publish:
+        type: boolean
+        default: false
+      manual_vm_acceptance:
+        description: 'Attest Windows VM test for the exact source release before publishing'
+        type: boolean
+        default: false
+permissions:
+  contents: write
+concurrency:
+  group: sandboxie-portable-release
+  cancel-in-progress: false
+jobs:
+  repackage:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      SOURCE_TAG: ${{ inputs.source_release_tag }}
+      SOURCE_ZIP: ${{ inputs.source_zip_asset }}
+      TARGET_TAG: ${{ inputs.new_release_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download, verify publisher checksums, extract and validate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/repackage.py
+          if ($LASTEXITCODE -ne 0) {throw 'Verified source release ZIP was not accepted'}
+      - name: Rebuild installer only using shared package builder
+        id: pkg
+        uses: vhick/Portable-Package-Builder@v1.0.0
+        with:
+          source-dir: work/SandboxiePlusPortable
+          output-dir: dist
+          running-exe: 'App\Sandboxie\SandMan.exe'
+          engine: custom-nsis
+          package-revision: b1r1-repack
+      - name: Require VM acceptance before publishing
+        if: inputs.publish
+        run: |
+          if ('${{ inputs.manual_vm_acceptance }}' -ne 'true') {throw 'No manual VM acceptance attestation'}
+      - name: Publisher dry run
+        if: inputs.publish
+        uses: vhick/portable-release-publisher@v1.1.1
+        with:
+          files: 'dist/*.paf.exe'
+          tag: ${{ inputs.new_release_tag }}
+          keep-releases: '3'
+          prune: 'false'
+          dry-run: 'true'
+      - name: Publish fresh repackage tag (does not overwrite source release)
+        if: inputs.publish
+        uses: vhick/portable-release-publisher@v1.1.1
+        with:
+          files: 'dist/*.paf.exe'
+          tag: ${{ inputs.new_release_tag }}
+          keep-releases: '3'
+          prune: 'false'
+          dry-run: 'false'
+      - name: Downloadable test candidate when publishing is disabled
+        if: ${{ !inputs.publish }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: SandboxiePlusPortable-REPACKAGE-CANDIDATE
+          path: 'dist/*.paf.exe'
+          retention-days: 2

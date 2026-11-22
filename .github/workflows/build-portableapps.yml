@@ -1,0 +1,147 @@
+name: Sandboxie Plus - PortableApps ZIP and shared installer
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_tag:
+        description: 'Blank = latest compatible stable upstream tag; optional exact vX.Y.Z'
+        type: string
+        default: ''
+      installer_engine:
+        description: 'Shared installer engine (official requires separately verified tool URL/SHA)'
+        type: choice
+        options: [custom-nsis, official]
+        default: custom-nsis
+      official_tool_url:
+        type: string
+        description: 'For experimental official engine only: official PortableApps Installer HTTPS URL'
+        default: ''
+      official_tool_sha256:
+        type: string
+        description: 'For experimental official engine only: vendor-published SHA256'
+        default: ''
+      force_rebuild:
+        description: 'Rebuild even when matching release already exists (publisher still blocks conflicting overwrite)'
+        type: boolean
+        default: false
+      publish:
+        description: 'Publish after checks; false uploads a short-lived candidate for manual VM testing'
+        type: boolean
+        default: false
+      manual_vm_acceptance:
+        description: 'I have tested this exact version/revision on Windows in an isolated VM; required for publishing'
+        type: boolean
+        default: false
+permissions:
+  contents: write
+concurrency:
+  group: sandboxie-portable-release
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 80
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      TAG_REQUEST: ${{ inputs.upstream_tag }}
+    steps:
+      - name: Checkout independent builder
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Python setup
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Offline regressions before downloading binaries
+        run: python -m unittest discover -s tests -v
+      - name: Resolve stable upstream release and audit upstream portable mode at its tag
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ($env:TAG_REQUEST) { python scripts/resolve.py --tag $env:TAG_REQUEST } else { python scripts/resolve.py }
+          if ($LASTEXITCODE -ne 0) {throw 'Upstream release resolution and license checks failed'}
+      - name: Skip if exact builder release already exists
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VER: ${{ steps.resolve.outputs.version }}
+          REV: ${{ steps.resolve.outputs.package_revision }}
+        run: |
+          $tag="portable-v$env:VER-$env:REV"
+          Write-Host "Expected publisher tag: $tag"
+          gh release view $tag --json tagName --jq '.tagName' 1>$null 2>$null
+          if ($LASTEXITCODE -eq 0 -and '${{ inputs.force_rebuild }}' -ne 'true') {"skip=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8;Write-Host 'Identical revision already released. Skipping duplicate compilation and publishing.'}
+          else {"skip=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8}
+      - name: Verify official asset and extract with upstream PORTABLE mode (never start kernel driver in CI)
+        if: steps.existing.outputs.skip != 'true'
+        run: ./scripts/acquire.ps1
+      - name: Compile transparent genuine portable WinExe launcher
+        if: steps.existing.outputs.skip != 'true'
+        run: ./scripts/compile-launcher.ps1
+      - name: Assemble, validate and ZIP independent PortableApps folder
+        if: steps.existing.outputs.skip != 'true'
+        run: |
+          python scripts/stage.py --no-zip
+          if ($LASTEXITCODE -ne 0) {throw 'PortableApps staging failed'}
+          ./scripts/icons.ps1
+          python scripts/stage.py --zip-only
+          if ($LASTEXITCODE -ne 0) {throw 'PortableApps independent ZIP creation failed'}
+          python scripts/package-validate.py work/SandboxiePlusPortable work/upstream/Extracted
+          if ($LASTEXITCODE -ne 0) {throw 'Upstream binary integrity / staging failed'}
+          python -c "import zipfile,glob;z=glob.glob('dist/*.zip');assert len(z)==1;f=zipfile.ZipFile(z[0]);assert f.testzip() is None;print('ZIP OK:',len(f.namelist()),'entries')"
+          if ($LASTEXITCODE -ne 0) {throw 'ZIP verification failed'}
+      - name: Build independent PAF-style installer with shared packager
+        if: steps.existing.outputs.skip != 'true'
+        id: packager
+        uses: vhick/Portable-Package-Builder@v1.0.0
+        with:
+          source-dir: work/SandboxiePlusPortable
+          output-dir: dist
+          running-exe: 'App\Sandboxie\SandMan.exe'
+          engine: ${{ inputs.installer_engine }}
+          package-revision: b1r1
+          official-tool-url: ${{ inputs.official_tool_url }}
+          official-tool-sha256: ${{ inputs.official_tool_sha256 }}
+      - name: Require explicit operator attestation for kernel driver runtime test
+        if: steps.existing.outputs.skip != 'true' && inputs.publish
+        run: |
+          if ('${{ inputs.manual_vm_acceptance }}' -ne 'true') {throw 'No VM acceptance attestation. Publishing blocked. Re-run after isolated Windows testing.'}
+      - name: Preview publisher output and checksums
+        if: steps.existing.outputs.skip != 'true' && inputs.publish
+        uses: vhick/portable-release-publisher@v1.1.1
+        with:
+          files: 'dist/*.zip;dist/*.paf.exe'
+          tag: portable-v${{ steps.resolve.outputs.version }}-${{ steps.resolve.outputs.package_revision }}
+          release-title: Sandboxie Plus Portable ${{ steps.resolve.outputs.version }} (independent b1r1)
+          keep-releases: '3'
+          prune: 'false'
+          dry-run: 'true'
+      - name: Publish only after explicit manual VM acceptance
+        if: steps.existing.outputs.skip != 'true' && inputs.publish
+        uses: vhick/portable-release-publisher@v1.1.1
+        with:
+          files: 'dist/*.zip;dist/*.paf.exe'
+          tag: portable-v${{ steps.resolve.outputs.version }}-${{ steps.resolve.outputs.package_revision }}
+          release-title: Sandboxie Plus Portable ${{ steps.resolve.outputs.version }} (independent b1r1)
+          keep-releases: '3'
+          prune: 'false'
+          dry-run: 'false'
+      - name: Short-lived candidate for isolated VM acceptance
+        if: steps.existing.outputs.skip != 'true' && !inputs.publish
+        uses: actions/upload-artifact@v4
+        with:
+          name: SandboxiePlusPortable-CANDIDATE-VM-TEST
+          path: |
+            dist/*.zip
+            dist/*.paf.exe
+          retention-days: 2
+          if-no-files-found: error
+      - name: Failure diagnostics (never move or replace a successful release)
+        if: failure()
+        run: |
+          Write-Host 'Build failed. Exact upstream release, preflight, signature, launcher, source-layout or packager diagnosis is in job steps.'
+          if (Test-Path work/resolved.json) { Get-Content work/resolved.json }
+          if (Test-Path work/upstream/integrity.json) { Get-Content work/upstream/integrity.json }

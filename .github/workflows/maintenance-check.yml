@@ -1,0 +1,32 @@
+name: Sandboxie Plus - Maintenance check (never publishes)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compatibility:
+    runs-on: windows-2022
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Offline tests
+        run: python -m unittest discover -s tests -v
+      - name: Current stable release + source/portable license audit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/resolve.py
+      - name: Print pinned shared action metadata for review
+        shell: pwsh
+        run: |
+          foreach ($entry in @(@('vhick/Portable-Package-Builder','v1.0.0'),@('vhick/portable-release-publisher','v1.1.1'))) {
+            $url='https://raw.githubusercontent.com/'+$entry[0]+'/'+$entry[1]+'/action.yml'
+            Write-Host "Checking pinned action contract: $url"
+            $response=Invoke-WebRequest -Uri $url -TimeoutSec 20
+            if ($response.StatusCode -ne 200 -or $response.Content -notmatch 'inputs:') {throw "Action contract unavailable: $url"}
+          }
+          Write-Host 'Shared integrations still publicly accessible. This check does not automatically upgrade or validate new action releases.'

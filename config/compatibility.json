@@ -1,0 +1,50 @@
+{
+  "upstream_repository": "sandboxie-plus/Sandboxie",
+  "edition": "Plus",
+  "architecture": "x64",
+  "stable_version_regex": "^v(?P<version>[0-9]+\\.[0-9]+\\.[0-9]+)$",
+  "asset_regex": "(?i)^Sandboxie-Plus[-_]x64[-_].*\\.exe$",
+  "exclude_asset_regex": "(?i)(beta|alpha|nightly|preview|debug|symbols)",
+  "required_files": [
+    "SandMan.exe",
+    "Start.exe",
+    "SbieDrv.sys",
+    "SbieSvc.exe",
+    "KmdUtil.exe",
+    "SbieDll.dll",
+    "32/SbieDll.dll"
+  ],
+  "package_revision": "b1r1",
+  "source_license_path": "LICENSE.Plus",
+  "source_installer_path": "Installer/Sandboxie-Plus.iss",
+  "windows_runner": "windows-2022",
+  "shared_packager": "vhick/Portable-Package-Builder@v1.0.0",
+  "shared_publisher": "vhick/portable-release-publisher@v1.1.1",
+  "allow_unsigned_official_assets": false,
+  "allow_fallback_to_unverified_hash": false,
+  "portable_mode_flags": [
+    "/PORTABLE=1",
+    "/CURRENTUSER",
+    "/VERYSILENT",
+    "/SUPPRESSMSGBOXES",
+    "/NORESTART",
+    "/SP-"
+  ],
+  "preflight_fail_if_system_ini": true,
+  "runtime_watch_nonbinary_extensions": [
+    ".ini",
+    ".json",
+    ".log",
+    ".db",
+    ".sqlite",
+    ".sqlite3",
+    ".txt",
+    ".xml",
+    ".cfg",
+    ".dat",
+    ".yaml",
+    ".yml"
+  ],
+  "source_mode": "official-unmodified-upstream-installer",
+  "portableapps_format_version": "3.9"
+}

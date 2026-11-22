@@ -1,0 +1,13 @@
+Summary:
+Add Sandboxie Plus PortableApps builder b1r1
+
+Description:
+- Add stable upstream Plus x64 resolver with tag-commit source/license audit
+- Acquire original signed upstream installer using its native portable mode
+- Add compiled Windows launcher with Data/Config and TraceGuard crash recovery
+- Package independent PortableApps ZIP and invoke pinned shared custom-NSIS packager
+- Integrate pinned universal release publisher with manual Windows VM publication gate
+- Add packaging-only, maintenance, offline regression tests, and setup documentation
+- Leave kernel driver/service installation and removal to upstream Sandboxie controls
+
+Status: Initial candidate; Windows Actions/VM runtime acceptance still required.
