@@ -1,6 +1,6 @@
 import unittest,sys,tempfile,json,pathlib,zipfile
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]/'scripts'))
-from resolve import choose_release,choose_asset,semver,validate_license
+from resolve import choose_release,choose_asset,semver,validate_license,validate_installer_portable
 from stage import zip_folder
 from importlib.util import spec_from_file_location,module_from_spec
 p=pathlib.Path(__file__).resolve().parents[1]/'scripts'/'package-validate.py';s=spec_from_file_location('validation',p);v=module_from_spec(s);s.loader.exec_module(v)
@@ -112,3 +112,61 @@ class StageSimulation(unittest.TestCase):
    exe=d/'launcher.exe';exe.write_bytes(p)
    with self.assertRaisesRegex(ValueError,'human review'):
     make(d/'stage',{'version':'2.0.0','asset_url':'https://example.com','commit':'x','release_url':'https://example.com'},origin,exe)
+
+
+# Actual Inno Setup field arrangement seen at upstream v1.19.1: the source
+# file and installation destination are independent fields.
+UPSTREAM_INSTALLER_V1191 = r'''[Setup]
+Uninstallable=not IsPortable
+PrivilegesRequiredOverridesAllowed=commandline
+
+[Files]
+Source: ".\Release\{#MyAppSrc}\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
+Source: ".\Sandboxie.ini"; DestDir: "{app}"; Flags: ignoreversion onlyifdoesntexist; Check: IsPortable
+Source: ".\Sandboxie-Plus.ini"; DestDir: "{app}"; Flags: ignoreversion onlyifdoesntexist; Check: IsPortable
+
+[INI]
+Filename: "{app}\{#MyAppName}.ini"; Section: "Options"; Key: "UiLanguage"; Check: IsPortable
+
+[Code]
+function IsPortable(): Boolean;
+begin
+  if (ExpandConstant('{param:portable|0}') = '1') or Portable then begin
+    Result := True;
+  end;
+end;
+'''
+
+class PortableInstallerSourceRegressions(unittest.TestCase):
+ def test_actual_v1191_source_destdir_format_accepted(self):
+  contract = validate_installer_portable(UPSTREAM_INSTALLER_V1191)
+  self.assertEqual(contract['portable_ini_files'],['Sandboxie.ini','Sandboxie-Plus.ini'])
+  self.assertEqual(contract['config_destination'],'{app}')
+ def test_compatible_whitespace_and_case_variations(self):
+  altered=UPSTREAM_INSTALLER_V1191.replace('DestDir: "{app}"','DestDir: "{APP}\\"').replace('Check: IsPortable','Check: ( IsPortable )')
+  self.assertTrue(validate_installer_portable(altered))
+ def test_missing_plus_ini_fails(self):
+  text=UPSTREAM_INSTALLER_V1191.replace('Source: ".\\Sandboxie-Plus.ini";', 'Source: ".\\ChangedPlus.ini";')
+  with self.assertRaisesRegex(RuntimeError, 'Sandboxie-Plus.ini'):
+   validate_installer_portable(text)
+ def test_nonportable_only_ini_fails(self):
+  text=UPSTREAM_INSTALLER_V1191.replace('onlyifdoesntexist; Check: IsPortable', 'onlyifdoesntexist; Check: not IsPortable')
+  with self.assertRaisesRegex(RuntimeError, 'portable mode'):
+   validate_installer_portable(text)
+ def test_non_app_storage_target_fails(self):
+  text=UPSTREAM_INSTALLER_V1191.replace('Source: ".\\Sandboxie-Plus.ini"; DestDir: "{app}"', 'Source: ".\\Sandboxie-Plus.ini"; DestDir: "{localappdata}"')
+  with self.assertRaisesRegex(RuntimeError, 'destination changed'):
+   validate_installer_portable(text)
+ def test_overwrite_existing_settings_fails(self):
+  text=UPSTREAM_INSTALLER_V1191.replace('ignoreversion onlyifdoesntexist; Check: IsPortable', 'ignoreversion; Check: IsPortable')
+  with self.assertRaisesRegex(RuntimeError, 'overwrite'):
+   validate_installer_portable(text)
+ def test_duplicate_configuration_entry_fails(self):
+  row='Source: ".\\Sandboxie.ini"; DestDir: "{app}"; Flags: ignoreversion onlyifdoesntexist; Check: IsPortable'
+  text=UPSTREAM_INSTALLER_V1191.replace(row,row+'\n'+row)
+  with self.assertRaisesRegex(RuntimeError, 'expected one'):
+   validate_installer_portable(text)
+ def test_mentions_in_comments_do_not_count(self):
+  text=UPSTREAM_INSTALLER_V1191.replace('Source: ".\\Sandboxie-Plus.ini";', '; Source: ".\\Sandboxie-Plus.ini";')
+  with self.assertRaisesRegex(RuntimeError, 'Sandboxie-Plus.ini'):
+   validate_installer_portable(text)

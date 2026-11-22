@@ -14,7 +14,7 @@
     "SbieDll.dll",
     "32/SbieDll.dll"
   ],
-  "package_revision": "b1r2",
+  "package_revision": "b1r3",
   "source_license_path": "LICENSE.Plus",
   "source_installer_path": "Installer/Sandboxie-Plus.iss",
   "windows_runner": "windows-2022",

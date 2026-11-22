@@ -88,6 +88,70 @@ def validate_license(lic):
     if missing:
         raise RuntimeError('Plus license terms changed: manual redistribution review required; missing '+repr(missing))
 
+def validate_installer_portable(iss):
+    """Validate Inno Setup *semantics* instead of a guessed concatenated path.
+
+    Inno's Source and DestDir are separate fields. In v1.19.1 the installer
+    uses Source: ".\\Sandboxie-Plus.ini"; DestDir: "{app}", not the literal
+    string "{app}\\Sandboxie-Plus.ini". Matching that nonexistent string
+    falsely rejected the genuine portable installer.
+
+    This is a deliberately narrow, fail-closed validator, not a full Inno
+    interpreter. Macro-substituted/dynamic source paths require human review.
+    """
+    required_signals = (
+        r'Uninstallable=not IsPortable',
+        r'PrivilegesRequiredOverridesAllowed=commandline',
+        r'{param:portable|0}',
+        r'function IsPortable()',
+    )
+    for marker in required_signals:
+        if marker.casefold() not in iss.casefold():
+            raise RuntimeError('Upstream portable installer contract changed: missing ' + marker)
+
+    # Only interpret real [Files] entries, not unrelated [INI], comments, or
+    # incidental mentions in the documentation or Pascal code section.
+    header = re.search(r'(?im)^\s*\[Files\]\s*$', iss)
+    if not header:
+        raise RuntimeError('Upstream installer has no [Files] section')
+    rest = iss[header.end():]
+    end = re.search(r'(?m)^\s*\[[A-Za-z][\w ]*\]\s*$', rest)
+    block = rest[:end.start()] if end else rest
+
+    entries = []
+    for line in block.splitlines():
+        line = line.strip()
+        if not line or line.startswith(';') or line.startswith('//') or line.startswith('#'):
+            continue
+        # Inno [Files] fields are written as Key: "value" or Key: value.
+        fields = {}
+        for m in re.finditer(r'\b(Source|DestDir|DestName|Flags|Check)\s*:\s*(?:"([^"]*)"|([^;]+))', line, re.I):
+            fields[m.group(1).lower()] = (m.group(2) if m.group(2) is not None else m.group(3)).strip()
+        if 'source' in fields:
+            entries.append(fields)
+
+    expected = ('Sandboxie.ini', 'Sandboxie-Plus.ini')
+    for filename in expected:
+        # File names are case insensitive on Windows. Both a relative Source
+        # and explicitly rooted Source are accepted; no variable substitution
+        # is attempted because it would hide incompatible future changes.
+        matches = [f for f in entries if f.get('source','').replace('/', '\\').rsplit('\\',1)[-1].casefold() == filename.casefold()]
+        if len(matches) != 1:
+            raise RuntimeError(f'Upstream portable installer configuration changed: expected one [Files] Source for {filename}, found {len(matches)}')
+        entry=matches[0]
+        dest=entry.get('destdir','').rstrip('\\/').casefold()
+        if dest != '{app}':
+            raise RuntimeError(f'Upstream portable installer config destination changed for {filename}: {entry.get("destdir")}')
+        if entry.get('destname',filename).casefold()!=filename.casefold():
+            raise RuntimeError(f'Upstream portable installer config filename changed for {filename}')
+        check=re.sub(r'[\s()]','',entry.get('check','')).casefold()
+        if check!='isportable':
+            raise RuntimeError(f'Upstream installer no longer restricts {filename} to portable mode')
+        flags={f.casefold() for f in entry.get('flags','').split()}
+        if 'onlyifdoesntexist' not in flags:
+            raise RuntimeError(f'Upstream installer may overwrite an existing portable {filename}')
+    return {'portable_ini_files': list(expected), 'config_destination': '{app}', 'source_analysis': 'Inno [Files] Source/DestDir/Flags/Check'}
+
 def source_check(commit):
     base=f'/repos/{CFG["upstream_repository"]}/contents/'
     # GitHub Contents API returns base64 text. The license and installer script are checked against the *tag commit*.
@@ -100,10 +164,8 @@ def source_check(commit):
     path=pathlib.Path('work/upstream-license/LICENSE.Plus');path.parent.mkdir(parents=True,exist_ok=True);path.write_text(lic,encoding='utf-8')
     validate_license(lic)
     iss=get(CFG['source_installer_path'])
-    signals=('Uninstallable=not IsPortable','Check: not IsPortable','Check: IsPortable','{app}\\Sandboxie.ini','{app}\\Sandboxie-Plus.ini','{param:portable|0}')
-    absent=[s for s in signals if s not in iss]
-    if absent:raise RuntimeError('Upstream portable installer compatibility assumptions changed: '+', '.join(absent))
-    return {'license_sha256':__import__('hashlib').sha256(lic.encode()).hexdigest(),'installer_script_sha256':__import__('hashlib').sha256(iss.encode()).hexdigest()}
+    portable_contract=validate_installer_portable(iss)
+    return {'license_sha256':__import__('hashlib').sha256(lic.encode()).hexdigest(),'installer_script_sha256':__import__('hashlib').sha256(iss.encode()).hexdigest(), 'portable_installer_contract': portable_contract}
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('--output',default='work/resolved.json');p.add_argument('--tag',default='');p.add_argument('--offline-fixture');a=p.parse_args()

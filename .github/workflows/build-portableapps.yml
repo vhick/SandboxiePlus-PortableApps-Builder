@@ -102,7 +102,7 @@ jobs:
           output-dir: dist
           running-exe: 'App\Sandboxie\SandMan.exe'
           engine: ${{ inputs.installer_engine }}
-          package-revision: b1r2
+          package-revision: b1r3
           official-tool-url: ${{ inputs.official_tool_url }}
           official-tool-sha256: ${{ inputs.official_tool_sha256 }}
       - name: Require explicit operator attestation for kernel driver runtime test
@@ -115,7 +115,7 @@ jobs:
         with:
           files: 'dist/*.zip;dist/*.paf.exe'
           tag: portable-v${{ steps.resolve.outputs.version }}-${{ steps.resolve.outputs.package_revision }}
-          release-title: Sandboxie Plus Portable ${{ steps.resolve.outputs.version }} (independent b1r2)
+          release-title: Sandboxie Plus Portable ${{ steps.resolve.outputs.version }} (independent b1r3)
           keep-releases: '3'
           prune: 'false'
           dry-run: 'true'
@@ -125,7 +125,7 @@ jobs:
         with:
           files: 'dist/*.zip;dist/*.paf.exe'
           tag: portable-v${{ steps.resolve.outputs.version }}-${{ steps.resolve.outputs.package_revision }}
-          release-title: Sandboxie Plus Portable ${{ steps.resolve.outputs.version }} (independent b1r2)
+          release-title: Sandboxie Plus Portable ${{ steps.resolve.outputs.version }} (independent b1r3)
           keep-releases: '3'
           prune: 'false'
           dry-run: 'false'
