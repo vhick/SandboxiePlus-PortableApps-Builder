@@ -1,27 +1,64 @@
 import unittest,sys,tempfile,json,pathlib,zipfile
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]/'scripts'))
-from resolve import choose_release,choose_asset,semver
+from resolve import choose_release,choose_asset,semver,validate_license
 from stage import zip_folder
 from importlib.util import spec_from_file_location,module_from_spec
 p=pathlib.Path(__file__).resolve().parents[1]/'scripts'/'package-validate.py';s=spec_from_file_location('validation',p);v=module_from_spec(s);s.loader.exec_module(v)
 
-def release(tag,prerelease=False,asset=None):return {'id':1,'tag_name':tag,'html_url':'https://github.com/sandboxie-plus/Sandboxie/releases/tag/'+tag,'prerelease':prerelease,'draft':False,'assets':asset or []}
+def asset(tag, name=None, size=24200000):
+ return {'id':5,'name':name or f'Sandboxie-Plus-x64-{tag}.exe','size':size,'state':'uploaded',
+         'browser_download_url':f'https://github.com/sandboxie-plus/Sandboxie/releases/download/{tag}/{name or f"Sandboxie-Plus-x64-{tag}.exe"}'}
+def release(tag,prerelease=False,asset_list=None):
+ return {'id':1,'tag_name':tag,'html_url':'https://github.com/sandboxie-plus/Sandboxie/releases/tag/'+tag,
+         'prerelease':prerelease,'draft':False,'assets':asset_list if asset_list is not None else [asset(tag)]}
 class ResolverTests(unittest.TestCase):
  def test_semver_numeric_order(self):
   self.assertEqual(choose_release([release('v1.9.10'),release('v1.19.1'),release('v1.19.0')])['tag_name'],'v1.19.1')
  def test_skip_prereleases_nightly(self):
   self.assertEqual(choose_release([release('v1.20.0',True),release('v1.19.1'),release('v1.21.0-beta')])['tag_name'],'v1.19.1')
  def test_asset_different_version(self):
-  r=release('v3.7.9',asset=[{'id':5,'name':'Sandboxie-Plus-x64-v3.7.9.exe','size':10000000,'state':'uploaded','browser_download_url':'https://github.com/sandboxie-plus/Sandboxie/releases/download/v3.7.9/Sandboxie-Plus-x64-v3.7.9.exe'}])
+  r=release('v3.7.9',asset_list=[asset('v3.7.9')])
   self.assertEqual(choose_asset(r)['id'],5)
  def test_asset_ambiguous_fails(self):
-  r=release('v3.7.9',asset=[])
+  r=release('v3.7.9',asset_list=[])
   with self.assertRaises(RuntimeError):choose_asset(r)
  def test_prerelease_only_fails(self):
   with self.assertRaises(RuntimeError):choose_release([release('v1.3.0-beta'),release('v1.4.0',True)])
  def test_reject_malicious_asset_url(self):
-  r=release('v3.7.9',asset=[{'id':5,'name':'Sandboxie-Plus-x64-v3.7.9.exe','size':10000000,'browser_download_url':'https://untrusted.example/a.exe'}])
+  r=release('v3.7.9',asset_list=[{**asset('v3.7.9'),'browser_download_url':'https://untrusted.example/a.exe'}])
   with self.assertRaises(RuntimeError):choose_asset(r)
+class PlusEditionRegressions(unittest.TestCase):
+ def test_classic_higher_major_version_is_not_selected(self):
+  # Actual failure from GitHub Actions on 2026-11-22.
+  classic=release('v5.40.1',asset_list=[asset('v5.40.1','SandboxieInstall64-v5.40.1.exe',3000000)])
+  plus=release('v1.19.1',asset_list=[asset('v1.19.1'),asset('v1.19.1','Sandboxie-Plus-ARM64-v1.19.1.exe')])
+  self.assertEqual(choose_release([classic,plus])['tag_name'],'v1.19.1')
+  self.assertEqual(choose_asset(plus)['name'],'Sandboxie-Plus-x64-v1.19.1.exe')
+ def test_mismatched_plus_asset_on_classic_version_tag_is_rejected(self):
+  # Some historical dual-edition releases can have different Plus and Classic numbering.
+  classic=release('v5.74.1',asset_list=[asset('v5.74.1','Sandboxie-Plus-x64-v1.19.1.exe')])
+  self.assertEqual(choose_release([classic,release('v1.19.1')])['tag_name'],'v1.19.1')
+ def test_matching_tag_without_versioned_asset_name(self):
+  # Controlled rename still accepted when Plus/x64 identity and metadata remain clear.
+  changed=release('v2.2.0',asset_list=[asset('v2.2.0','Sandboxie-Plus-x64-Setup.exe')])
+  self.assertEqual(choose_release([changed])['tag_name'],'v2.2.0')
+ def test_classic_only_fails_with_edition_diagnostic(self):
+  with self.assertRaisesRegex(RuntimeError,'Classic-only'):
+   choose_release([release('v5.40.1',asset_list=[asset('v5.40.1','SandboxieInstall64-v5.40.1.exe')])])
+ def test_ambiguous_newest_plus_must_not_fall_back(self):
+  newer=release('v2.1.0',asset_list=[asset('v2.1.0'),asset('v2.1.0','Sandboxie-Plus_x64-v2.1.0.exe')])
+  found=choose_release([newer,release('v1.19.1')])
+  self.assertEqual(found['tag_name'],'v2.1.0')
+  with self.assertRaisesRegex(RuntimeError,'exactly one'): choose_asset(found)
+ def test_newer_plus_release_with_renamed_compatible_asset(self):
+  release2=release('v2.1.2',asset_list=[asset('v2.1.2','Sandboxie-Plus_x64_v2.1.2.exe')])
+  self.assertEqual(choose_release([release('v1.19.1'),release2])['tag_name'],'v2.1.2')
+ def test_license_casing_matches_upstream(self):
+  validate_license('Permitted to redistribute the original unmodified binaries. Public distribution of self-compiled binaries is only permitted. A business certificate is required.')
+ def test_missing_license_permission_fails_closed(self):
+  with self.assertRaisesRegex(RuntimeError,'license terms changed'):
+   validate_license('a license with no redistribution permission')
+
 class ZipSafety(unittest.TestCase):
  def test_empty_nested_directories_preserved(self):
   with tempfile.TemporaryDirectory() as d:

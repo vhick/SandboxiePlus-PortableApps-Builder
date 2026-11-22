@@ -1,13 +1,10 @@
-Summary:
-Add Sandboxie Plus PortableApps builder b1r1
+Summary: Fix Sandboxie Plus release detection and license checks (b1r2)
 
 Description:
-- Add stable upstream Plus x64 resolver with tag-commit source/license audit
-- Acquire original signed upstream installer using its native portable mode
-- Add compiled Windows launcher with Data/Config and TraceGuard crash recovery
-- Package independent PortableApps ZIP and invoke pinned shared custom-NSIS packager
-- Integrate pinned universal release publisher with manual Windows VM publication gate
-- Add packaging-only, maintenance, offline regression tests, and setup documentation
-- Leave kernel driver/service installation and removal to upstream Sandboxie controls
-
-Status: Initial candidate; Windows Actions/VM runtime acceptance still required.
+- Fix stable release resolver selecting classic v5.40.1 over Plus v1.19.1
+- Filter official Plus x64 assets before comparing version numbers
+- Resolve explicitly requested upstream tags directly
+- Correct case-sensitive upstream license preflight without weakening license verification
+- Add future-release and failure regressions
+- Keep pinned shared package builder and publisher unchanged
+- Preserve publish-disabled, Windows VM testing protections

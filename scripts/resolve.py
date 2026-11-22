@@ -21,13 +21,47 @@ def semver(tag):
     match=re.fullmatch(CFG['stable_version_regex'],tag)
     return tuple(int(x) for x in match['version'].split('.')) if match else None
 
+def plus_assets(release):
+    """Find official Plus-x64 assets that actually belong to the release's Plus version.
+
+    Classic versions are a separate sequence; for dual-edition tags, a Plus asset
+    with a different embedded version must not be ranked using the Classic tag.
+    """
+    tag_version = semver(release.get('tag_name', ''))
+    result = []
+    for a in release.get('assets', []):
+        name = a.get('name', '')
+        if not re.fullmatch(CFG['asset_regex'], name): continue
+        if re.search(CFG['exclude_asset_regex'], name): continue
+        if a.get('size', 0) <= 1_000_000: continue
+        if a.get('state', 'uploaded') != 'uploaded': continue
+        # If an asset filename states a version, it must match the release tag.
+        # This permits compatible name changes without requiring a version token.
+        found = re.findall(r'(?<!\d)(\d+\.\d+\.\d+)(?!\d)', name)
+        if found and (tag_version is None or any(tuple(map(int, v.split('.'))) != tag_version for v in found)):
+            continue
+        result.append(a)
+    return result
+
 def choose_release(releases):
-    eligible=[r for r in releases if not r.get('draft') and not r.get('prerelease') and semver(r.get('tag_name',''))]
-    if not eligible: raise RuntimeError('No supported stable Sandboxie Plus release (semantic vX.Y.Z)')
-    return max(eligible,key=lambda r:semver(r['tag_name']))
+    stable = [r for r in releases if not r.get('draft') and not r.get('prerelease')
+              and semver(r.get('tag_name', ''))]
+    if not stable:
+        raise RuntimeError('No stable version tags (vX.Y.Z) were found in the requested releases')
+    # The same repository publishes Classic 5.x and Plus 1.x releases. Only compare
+    # versions *after* the edition is established by its official release assets.
+    eligible = [r for r in stable if plus_assets(r)]
+    if not eligible:
+        names = [f"{r['tag_name']}: {[a.get('name') for a in r.get('assets', [])]}"
+                 for r in sorted(stable, key=lambda r: semver(r['tag_name']), reverse=True)[:5]]
+        raise RuntimeError('No eligible stable Sandboxie PLUS x64 installer release found. '
+                           'Classic-only releases cannot be used. Sample assets: '+repr(names))
+    # A newer matching release with ambiguous Plus-x64 assets must fail during
+    # choose_asset, rather than silently rolling back to an older edition.
+    return max(eligible, key=lambda r: semver(r['tag_name']))
 
 def choose_asset(release):
-    xs=[a for a in release.get('assets',[]) if re.fullmatch(CFG['asset_regex'],a.get('name','')) and not re.search(CFG['exclude_asset_regex'],a['name']) and a.get('size',0)>1000000 and a.get('state','uploaded')=='uploaded']
+    xs=plus_assets(release)
     if len(xs)!=1:raise RuntimeError(f"Expected exactly one official Plus x64 installer, found {len(xs)}: {[a.get('name') for a in release.get('assets',[])]}")
     a=xs[0]
     if a.get('browser_download_url','').split('/')[2]!='github.com': raise RuntimeError('Untrusted asset URL host')
@@ -44,6 +78,16 @@ def tag_sha(tag):
     if not commit or not re.fullmatch('[0-9a-f]{40}',commit): raise RuntimeError('Cannot resolve the exact upstream tag to a Git commit')
     return commit
 
+def validate_license(lic):
+    # Upstream uses "Public distribution..." with an uppercase P in v1.19.1.
+    # Wording is still checked fail-closed; capitalization must not alter rights.
+    required = ('redistribute the original unmodified',
+                'public distribution of self-compiled binaries',
+                'business certificate')
+    missing = [item for item in required if item not in lic.casefold()]
+    if missing:
+        raise RuntimeError('Plus license terms changed: manual redistribution review required; missing '+repr(missing))
+
 def source_check(commit):
     base=f'/repos/{CFG["upstream_repository"]}/contents/'
     # GitHub Contents API returns base64 text. The license and installer script are checked against the *tag commit*.
@@ -54,8 +98,7 @@ def source_check(commit):
         return base64.b64decode(x['content']).decode('utf-8-sig')
     lic=get(CFG['source_license_path'])
     path=pathlib.Path('work/upstream-license/LICENSE.Plus');path.parent.mkdir(parents=True,exist_ok=True);path.write_text(lic,encoding='utf-8')
-    if not all(s in lic for s in ('redistribute the original unmodified','public distribution of self-compiled binaries','business certificate')):
-        raise RuntimeError('Plus license terms changed: manual redistribution review required')
+    validate_license(lic)
     iss=get(CFG['source_installer_path'])
     signals=('Uninstallable=not IsPortable','Check: not IsPortable','Check: IsPortable','{app}\\Sandboxie.ini','{app}\\Sandboxie-Plus.ini','{param:portable|0}')
     absent=[s for s in signals if s not in iss]
@@ -66,6 +109,11 @@ def main():
     p=argparse.ArgumentParser();p.add_argument('--output',default='work/resolved.json');p.add_argument('--tag',default='');p.add_argument('--offline-fixture');a=p.parse_args()
     if a.offline_fixture:
         releases=json.loads(pathlib.Path(a.offline_fixture).read_text())
+    elif a.tag:
+        # Explicit tags are resolved directly, even when too old for the first 300 releases.
+        # Validate tag syntax before embedding it in an API URL.
+        if not semver(a.tag): raise RuntimeError('Explicit upstream tag must be stable vX.Y.Z')
+        releases=[api(f'/repos/{CFG["upstream_repository"]}/releases/tags/{a.tag}')]
     else:
         releases=[]
         for page in range(1,4):

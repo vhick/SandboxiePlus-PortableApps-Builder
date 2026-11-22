@@ -1,4 +1,4 @@
-# Sandboxie Plus PortableApps Builder Kit — b1r1 (first Windows-test candidate)
+# Sandboxie Plus PortableApps Builder Kit — b1r2 (first Windows-test candidate)
 
 > **Status: Builder source and offline simulations validated; NOT yet verified by a Windows GitHub Actions run or driver/runtime acceptance test.** The first real build may expose issues requiring correction. Do not treat this as a certified PortableApps.com package or a no-trace portable security sandbox.
 
@@ -19,7 +19,7 @@ The bundled launcher captures the two root `.ini` settings before closing, recov
 1. Create a new empty repository in **GitHub Desktop → File → New repository**, e.g. `Sandboxie-Plus-PortableApps-Builder`. Do not fork the upstream Sandboxie repo.
 2. Choose **public** or **private** based on who should receive your releases. Public GitHub Releases are public; private GitHub Releases remain private to authorized users. Never publish code or packages to a public repo if you intend the package to stay private.
 3. Extract the **builder kit ZIP** from this conversation. Copy **all its contents**, including the hidden `.github` folder, directly into the new repository folder. The repository root should contain `README.md`, `scripts`, `launcher`, `config`, `tests` and `.github`.
-4. GitHub Desktop → **Changes** → type the commit summary `Add Sandboxie Plus PortableApps builder b1r1` → **Commit to main** → **Publish repository** or **Push origin**.
+4. GitHub Desktop → **Changes** → type the commit summary `Add Sandboxie Plus PortableApps builder b1r2` → **Commit to main** → **Publish repository** or **Push origin**.
 5. On github.com open your own builder repository → **Actions** → enable workflows if GitHub asks.
 6. Select **Sandboxie Plus - PortableApps ZIP and shared installer** → **Run workflow**. Leave `upstream_tag` blank for latest supported stable. Leave `installer_engine=custom-nsis`. For the first run, keep `publish=false` and `manual_vm_acceptance=false`. Run it.
 7. On the completed run, open its **Artifacts** area → download the short-lived **CANDIDATE-VM-TEST** archive (two-day retention). It contains the ZIP and an independently generated `.paf.exe` installer if the build passed.
@@ -43,12 +43,12 @@ The bundled launcher captures the two root `.ini` settings before closing, recov
 
 ## Adaptability model and known-good policy
 
-* Version discovery uses the official GitHub API, compares semantic versions numerically rather than by publication time, skips prereleases/drafts, and uses a strictly selected official Plus-x64 Inno Setup asset.
+* Version discovery uses the official GitHub API, compares semantic versions numerically rather than by publication time, skips prereleases/drafts, filters Classic-only releases by requiring official Plus-x64 asset identity **before** comparing versions, and uses a strictly selected official Plus-x64 Inno Setup asset.
 * Before running the installer, the resolver obtains its exact tag commit and checks `LICENSE.Plus` and `Installer/Sandboxie-Plus.iss` at that commit for the portable license and `IsPortable` safeguards. If they change, manual review is mandatory.
 * The upstream original Inno installer bundles the required Qt runtime, compiler output, driver and service: no unrelated Node/Rust/Go environments and no fragile forced dependency upgrades. This avoids drift in source toolchains, but means the builder relies on upstream continuing to distribute signed official installers with compatible portable flags.
 * Builder runtime uses built-in Windows .NET Framework compiler for its own launcher; Windows SDK and WDK builds are **not** performed. The official release version, commit, installer SHA-256, signer identity, original binary identities, and launcher/compiler provenance are recorded inside each ZIP under `Other/Source`.
 * The action versions are **intentionally pinned** to `vhick/Portable-Package-Builder@v1.0.0` and `vhick/portable-release-publisher@v1.1.1`. Maintenance checks do not silently upgrade them.
-* New ZIP versions are versioned as `SandboxiePlusPortable_X.Y.Z_b1r1_Win64.zip`. Existing `portable-vX.Y.Z-b1r1` Releases are never overwritten or silently republished. `config/known-good.json` deliberately has no claimed working build before Windows acceptance. Successful release assets serve as immutable records for reproduction/rollback.
+* New ZIP versions are versioned as `SandboxiePlusPortable_X.Y.Z_b1r2_Win64.zip`. Existing `portable-vX.Y.Z-b1r2` Releases are never overwritten or silently republished. `config/known-good.json` deliberately has no claimed working build before Windows acceptance. Successful release assets serve as immutable records for reproduction/rollback.
 * Source layouts, asset names, or storage changes outside compatible evidence are treated as **incompatibility**, not auto-patched. If an upstream version fails, the old release remains untouched.
 * GitHub Windows 2022 hosted runners and built-in .NET Framework compiler are baseline dependencies. If Microsoft removes them or changes support incompatibly, a reviewed builder revision is needed; no guaranteed arbitrary-future self-repair is possible.
 

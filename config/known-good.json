@@ -1,7 +1,7 @@
 {
   "status": "NO VERIFIED WINDOWS BUILD YET",
   "latest_upstream_success": null,
-  "builder_revision": "b1r1-candidate",
+  "builder_revision": "b1r2-candidate",
   "toolchain": null,
   "driver_runtime_test": "NOT RUN",
   "shared_packager_test": "NOT RUN ON THIS APPLICATION",
